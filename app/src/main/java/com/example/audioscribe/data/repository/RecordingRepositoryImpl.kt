@@ -5,6 +5,7 @@ import com.example.audioscribe.data.local.dao.RecordingDao
 import com.example.audioscribe.data.local.entity.AudioChunkEntity
 import com.example.audioscribe.data.local.entity.RecordingSessionEntity
 import com.example.audioscribe.domain.entity.ChunkInfo
+import com.example.audioscribe.domain.entity.RecordingSession
 import com.example.audioscribe.domain.repository.RecordingRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -85,4 +86,26 @@ class RecordingRepositoryImpl @Inject constructor(
     override fun observeSilenceWarning(sessionId: String): Flow<Boolean> {
         return silenceWarnings.getOrPut(sessionId) { MutableStateFlow(false) }
     }
+
+    override suspend fun saveTranscriptionAndSummary(sessionId: String, transcription: String?, summary: String?) {
+        dao.updateTranscriptionAndSummary(sessionId, transcription, summary)
+    }
+
+    override fun observeAllSessions(): Flow<List<RecordingSession>> {
+        return dao.observeAllSessions().map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
+
+    override fun observeSession(sessionId: String): Flow<RecordingSession?> {
+        return dao.observeSession(sessionId).map { it?.toDomain() }
+    }
+
+    private fun RecordingSessionEntity.toDomain() = RecordingSession(
+        sessionId = sessionId,
+        createdAtMs = createdAtMs,
+        status = status,
+        transcription = transcription,
+        summary = summary
+    )
 }

@@ -7,5 +7,7 @@ import androidx.room.PrimaryKey
 data class RecordingSessionEntity(
     @PrimaryKey val sessionId: String,
     val createdAtMs: Long,
-    val status: String // "RECORDING", "STOPPED", "PAUSED"
+    val status: String, // "RECORDING", "STOPPED", "PAUSED"
+    val transcription: String? = null,
+    val summary: String? = null
 )

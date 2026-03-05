@@ -125,12 +125,14 @@ class RecordingViewModel @Inject constructor(
                         _isRecording.value = false
                         stopTimer()
                         _timerText.value = "00:00"
+                        persistTranscriptionAndSummary(sessionId)
                     }
                     "STOPPED_LOW_STORAGE" -> {
                         _uiState.value = RecordingUiState.STOPPED
                         _isRecording.value = false
                         stopTimer()
                         _storageError.value = "Recording stopped \u2013 Low storage"
+                        persistTranscriptionAndSummary(sessionId)
                     }
                     else -> {
                         _uiState.value = RecordingUiState.IDLE
@@ -265,6 +267,14 @@ class RecordingViewModel @Inject constructor(
             } finally {
                 _isSummarizing.value = false
             }
+        }
+    }
+
+    private fun persistTranscriptionAndSummary(sessionId: String) {
+        viewModelScope.launch {
+            val transcription = _transcriptionText.value.takeIf { it.isNotBlank() }
+            val summary = _summaryText.value.takeIf { it.isNotBlank() }
+            recordingRepository.saveTranscriptionAndSummary(sessionId, transcription, summary)
         }
     }
 

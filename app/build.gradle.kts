@@ -73,6 +73,7 @@ dependencies {
     implementation("com.google.dagger:hilt-android:2.59.1")
     ksp("com.google.dagger:hilt-android-compiler:2.59.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+    implementation("androidx.navigation:navigation-compose:2.8.9")
     implementation("androidx.hilt:hilt-work:1.3.0")
 
     // Local Storage (Room Database)

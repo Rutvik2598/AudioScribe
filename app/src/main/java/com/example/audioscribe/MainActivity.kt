@@ -8,10 +8,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.ui.Modifier
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import androidx.navigation.NavType
+import com.example.audioscribe.ui.detail.RecordingDetailScreen
+import com.example.audioscribe.ui.home.HomeScreen
+import com.example.audioscribe.ui.memories.MemoriesScreen
 import com.example.audioscribe.ui.recording.RecordingScreen
 import com.example.audioscribe.ui.theme.AudioScribeTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -53,9 +57,35 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             AudioScribeTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    // Get the ViewModel instance for later use
-                    RecordingScreen(modifier = Modifier.padding(innerPadding))
+                val navController = rememberNavController()
+                NavHost(navController = navController, startDestination = "home") {
+                    composable("home") {
+                        HomeScreen(
+                            onCaptureNotesClick = { navController.navigate("recording") },
+                            onViewMemoriesClick = { navController.navigate("memories") }
+                        )
+                    }
+                    composable("recording") {
+                        RecordingScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("memories") {
+                        MemoriesScreen(
+                            onBack = { navController.popBackStack() },
+                            onRecordingClick = { sessionId ->
+                                navController.navigate("detail/$sessionId")
+                            }
+                        )
+                    }
+                    composable(
+                        route = "detail/{sessionId}",
+                        arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
+                    ) {
+                        RecordingDetailScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                 }
             }
         }

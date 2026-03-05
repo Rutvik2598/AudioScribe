@@ -22,4 +22,10 @@ interface RecordingDao {
 
     @Query("SELECT * FROM audio_chunks WHERE sessionId = :sessionId ORDER BY chunkIndex ASC")
     fun observeChunks(sessionId: String): Flow<List<AudioChunkEntity>>
+
+    @Query("UPDATE recording_sessions SET transcription = :transcription, summary = :summary WHERE sessionId = :sessionId")
+    suspend fun updateTranscriptionAndSummary(sessionId: String, transcription: String?, summary: String?)
+
+    @Query("SELECT * FROM recording_sessions ORDER BY createdAtMs DESC")
+    fun observeAllSessions(): Flow<List<RecordingSessionEntity>>
 }
