@@ -1,14 +1,15 @@
 package com.example.audioscribe.service
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothHeadset
+import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.pm.PackageManager
+import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -23,7 +24,6 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.annotation.RequiresApi
-import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.example.audioscribe.domain.AudioChunker
 import com.example.audioscribe.domain.AudioStreamer
@@ -38,7 +38,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import java.util.UUID
 import javax.inject.Inject
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -66,6 +65,8 @@ class RecordingForegroundService: Service() {
     private var silenceStartMs: Long = 0L
     private var isSilenceWarningActive = false
 
+    private var headsetReceiver: BroadcastReceiver? = null
+
     private lateinit var sessionId: String
 
     override fun onCreate() {
@@ -73,6 +74,7 @@ class RecordingForegroundService: Service() {
         createNotificationChannel()
         audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager
         registerPhoneStateListener()
+        registerHeadsetReceiver()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -280,6 +282,7 @@ class RecordingForegroundService: Service() {
     override fun onDestroy() {
         storageMonitorJob?.cancel()
         unregisterPhoneStateListener()
+        unregisterHeadsetReceiver()
         abandonAudioFocus()
         super.onDestroy()
         serviceScope.cancel()
@@ -562,6 +565,92 @@ class RecordingForegroundService: Service() {
         }
     }
 
+    // Headset source change handling
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private fun registerHeadsetReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    AudioManager.ACTION_HEADSET_PLUG -> {
+                        val state = intent.getIntExtra("state", -1)
+                        val name = intent.getStringExtra("name") ?: "Wired headset"
+                        Log.i(MIC_SOURCE_LOG_TAG, "$name connected: $state")
+                        when (state) {
+                            1 -> handleMicSourceChanged("Wired headset connected")
+                            0 -> handleMicSourceChanged("Wired headset disconnected")
+                        }
+                    }
+                    BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                        val state = intent.getIntExtra(
+                            BluetoothHeadset.EXTRA_STATE,
+                            BluetoothHeadset.STATE_DISCONNECTED
+                        )
+                        when (state) {
+                            BluetoothHeadset.STATE_CONNECTED ->
+                                handleMicSourceChanged("Bluetooth headset connected")
+                            BluetoothHeadset.STATE_DISCONNECTED ->
+                                handleMicSourceChanged("Bluetooth headset disconnected")
+                        }
+                    }
+                }
+            }
+        }
+        headsetReceiver = receiver
+
+        val filter = IntentFilter().apply {
+            addAction(AudioManager.ACTION_HEADSET_PLUG)
+            addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
+    }
+
+    private fun unregisterHeadsetReceiver() {
+        headsetReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: IllegalArgumentException) {
+                // Receiver not registered
+                Log.d("RecordingForegroundService", "Receiver not registered")
+            }
+        }
+        headsetReceiver = null
+    }
+
+    /**
+     * Called when a headset is plugged/unplugged or Bluetooth headset connects/disconnects.
+     * AudioRecord with MediaRecorder.AudioSource.MIC automatically routes to the new
+     * default microphone — no pipeline restart needed. We just show a transient notification.
+     */
+    private fun handleMicSourceChanged(description: String) {
+        Log.i(MIC_SOURCE_LOG_TAG, description)
+
+        // Only show notification if we are actively recording
+        if (recordingJob == null) return
+
+        // Show a brief notification about the source change
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(
+            NOTIF_ID,
+            buildNotification("Recording... ($description)")
+        )
+
+        // Revert notification text back to normal after 3 seconds
+        serviceScope.launch {
+            delay(3_000L)
+            // Only revert if still recording (status might have changed)
+            if (recordingJob != null) {
+                notificationManager.notify(
+                    NOTIF_ID,
+                    buildNotification("Recording...")
+                )
+            }
+        }
+    }
+
     private fun checkSilence(amplitude: Int) {
         val now = System.currentTimeMillis()
         if (amplitude > SILENCE_THRESHOLD) {
@@ -592,6 +681,7 @@ class RecordingForegroundService: Service() {
         const val STATUS_PAUSED_AUDIO_FOCUS = "PAUSED_AUDIO_FOCUS"
         const val STATUS_STOPPED_LOW_STORAGE = "STOPPED_LOW_STORAGE"
         const val CALL_STATE_LOG_TAG = "RecordingCallState"
+        private const val MIC_SOURCE_LOG_TAG = "RecordingMicSource"
         private const val STORAGE_CHECK_INTERVAL_MS = 10_000L  // check every 10 seconds
         private const val SILENCE_THRESHOLD = 800  // amplitude below this is considered silent
         private const val SILENCE_DURATION_MS = 10_000L  // 10 seconds of silence triggers warning
