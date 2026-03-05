@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audioscribe.data.remote.GeminiTranscriptionService
 import com.example.audioscribe.domain.PcmToWavConverter
+import com.example.audioscribe.domain.StorageHelper
 import com.example.audioscribe.domain.entity.ChunkInfo
 import com.example.audioscribe.domain.repository.RecordingRepository
 import com.example.audioscribe.service.RecordingForegroundService
@@ -31,7 +32,8 @@ private const val MIN_PCM_BYTES_FOR_TRANSCRIPTION = 96_000
 class RecordingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val recordingRepository: RecordingRepository,
-    private val transcriptionService: GeminiTranscriptionService
+    private val transcriptionService: GeminiTranscriptionService,
+    private val storageHelper: StorageHelper
 ): ViewModel() {
 
     private val _uiState = MutableStateFlow(RecordingUiState.IDLE)
@@ -68,6 +70,10 @@ class RecordingViewModel @Inject constructor(
     /** Non-null when the last summary attempt failed. */
     private val _summaryError = MutableStateFlow<String?>(null)
     val summaryError: StateFlow<String?> = _summaryError
+
+    /** Non-null when a storage-related error occurs. */
+    private val _storageError = MutableStateFlow<String?>(null)
+    val storageError: StateFlow<String?> = _storageError
 
     private var summaryJob: Job? = null
 
@@ -114,6 +120,12 @@ class RecordingViewModel @Inject constructor(
                         _isRecording.value = false
                         stopTimer()
                         _timerText.value = "00:00"
+                    }
+                    "STOPPED_LOW_STORAGE" -> {
+                        _uiState.value = RecordingUiState.STOPPED
+                        _isRecording.value = false
+                        stopTimer()
+                        _storageError.value = "Recording stopped \u2013 Low storage"
                     }
                     else -> {
                         _uiState.value = RecordingUiState.IDLE
@@ -246,6 +258,12 @@ class RecordingViewModel @Inject constructor(
     fun startRecording() {
         if(_isRecording.value) return
 
+        // Check storage before starting
+        if (!storageHelper.hasEnoughStorageToStart(context)) {
+            _storageError.value = "Cannot start recording \u2013 Low storage"
+            return
+        }
+
         // Reset transcription state for a new session
         transcriptions.clear()
         transcribedUpTo = -1
@@ -253,6 +271,7 @@ class RecordingViewModel @Inject constructor(
         _transcriptionError.value = null
         _summaryText.value = ""
         _summaryError.value = null
+        _storageError.value = null
         summaryJob?.cancel()
 
         sessionId = UUID.randomUUID().toString()

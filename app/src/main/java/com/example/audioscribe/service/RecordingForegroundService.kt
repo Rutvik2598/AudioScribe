@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.example.audioscribe.domain.AudioChunker
 import com.example.audioscribe.domain.AudioStreamer
+import com.example.audioscribe.domain.StorageHelper
 import com.example.audioscribe.domain.repository.RecordingRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
@@ -45,9 +47,11 @@ class RecordingForegroundService: Service() {
 
     @Inject lateinit var audioStreamer: AudioStreamer
     @Inject lateinit var recordingRepository: RecordingRepository
+    @Inject lateinit var storageHelper: StorageHelper
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recordingJob: Job? = null
+    private var storageMonitorJob: Job? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var telephonyManager: TelephonyManager? = null
@@ -183,9 +187,12 @@ class RecordingForegroundService: Service() {
                 }
             }
         }
+        startStorageMonitor()
     }
 
     private fun stopRecordingPipeline(flushChunk: Boolean) {
+        storageMonitorJob?.cancel()
+        storageMonitorJob = null
         recordingJob?.cancel()
         recordingJob = null
         if (flushChunk) {
@@ -208,12 +215,60 @@ class RecordingForegroundService: Service() {
         chunker = null
     }
 
+    /**
+     * Periodically checks available storage while recording.
+     * If storage is critically low, stops the recording gracefully.
+     */
+    private fun startStorageMonitor() {
+        storageMonitorJob?.cancel()
+        storageMonitorJob = serviceScope.launch {
+            while (true) {
+                delay(STORAGE_CHECK_INTERVAL_MS)
+                if (storageHelper.isStorageCriticallyLow(this@RecordingForegroundService)) {
+                    Log.w("RecordingStorage", "Storage critically low – stopping recording")
+                    stopRecordingLowStorage()
+                    break
+                }
+            }
+        }
+    }
+
+    /**
+     * Stops recording because of low storage.
+     * Flushes current chunk, sets session status to STOPPED_LOW_STORAGE.
+     */
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun stopRecordingLowStorage() {
+        stopRecordingPipeline(flushChunk = true)
+        abandonAudioFocus()
+        isPausedByPhoneCall = false
+        wasRecordingBeforePhoneCall = false
+        isPausedByAudioFocusLoss = false
+        wasRecordingBeforeAudioFocusLoss = false
+
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+
+        runBlocking {
+            recordingRepository.updateSessionStatus(sessionId, STATUS_STOPPED_LOW_STORAGE)
+        }
+
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIF_ID, buildNotification("Stopped – Low storage"))
+
+        stopForeground(true)
+        stopSelf()
+    }
+
     override fun onBind(p0: Intent?): IBinder? {
         TODO("Not yet implemented")
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onDestroy() {
+        storageMonitorJob?.cancel()
         unregisterPhoneStateListener()
         abandonAudioFocus()
         super.onDestroy()
@@ -508,6 +563,8 @@ class RecordingForegroundService: Service() {
         const val EXTRA_SESSION_ID = "EXTRA_SESSION_ID"
         const val STATUS_PAUSED_PHONE_CALL = "PAUSED_PHONE_CALL"
         const val STATUS_PAUSED_AUDIO_FOCUS = "PAUSED_AUDIO_FOCUS"
+        const val STATUS_STOPPED_LOW_STORAGE = "STOPPED_LOW_STORAGE"
         const val CALL_STATE_LOG_TAG = "RecordingCallState"
+        private const val STORAGE_CHECK_INTERVAL_MS = 10_000L  // check every 10 seconds
     }
 }
