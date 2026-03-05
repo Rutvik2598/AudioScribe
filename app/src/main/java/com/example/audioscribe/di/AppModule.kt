@@ -68,6 +68,7 @@ object NetworkModule {
 abstract class RepositoryModule {
 
     @Binds
+    @Singleton
     abstract fun bindRecordingRepository(
         impl: RecordingRepositoryImpl
     ): RecordingRepository

@@ -20,4 +20,8 @@ interface RecordingRepository {
     fun observeSessionStatus(sessionId: String): Flow<String>
 
     fun observeChunks(sessionId: String): Flow<List<ChunkInfo>>
+
+    fun setSilenceWarning(sessionId: String, detected: Boolean)
+
+    fun observeSilenceWarning(sessionId: String): Flow<Boolean>
 }

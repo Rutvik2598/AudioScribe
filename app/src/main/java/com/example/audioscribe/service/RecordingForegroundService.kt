@@ -63,6 +63,8 @@ class RecordingForegroundService: Service() {
     private var isPausedByPhoneCall = false
     private var wasRecordingBeforeAudioFocusLoss = false
     private var isPausedByAudioFocusLoss = false
+    private var silenceStartMs: Long = 0L
+    private var isSilenceWarningActive = false
 
     private lateinit var sessionId: String
 
@@ -171,9 +173,12 @@ class RecordingForegroundService: Service() {
     }
 
     private fun startRecordingPipeline() {
+        silenceStartMs = System.currentTimeMillis()
+        isSilenceWarningActive = false
         recordingJob = serviceScope.launch {
             chunker = AudioChunker()
             audioStreamer.startStream().collect { packet ->
+                checkSilence(packet.amplitude)
                 val chunk = chunker?.addPacket(packet)
                 if (chunk != null) {
                     recordingRepository.saveChunk(
@@ -193,6 +198,11 @@ class RecordingForegroundService: Service() {
     private fun stopRecordingPipeline(flushChunk: Boolean) {
         storageMonitorJob?.cancel()
         storageMonitorJob = null
+        // Clear silence warning when pipeline stops
+        if (isSilenceWarningActive) {
+            isSilenceWarningActive = false
+            recordingRepository.setSilenceWarning(sessionId, false)
+        }
         recordingJob?.cancel()
         recordingJob = null
         if (flushChunk) {
@@ -552,6 +562,23 @@ class RecordingForegroundService: Service() {
         }
     }
 
+    private fun checkSilence(amplitude: Int) {
+        val now = System.currentTimeMillis()
+        if (amplitude > SILENCE_THRESHOLD) {
+            Log.d("RecordingForegroundService", "Silence not detected")
+            silenceStartMs = now
+            if (isSilenceWarningActive) {
+                isSilenceWarningActive = false
+                recordingRepository.setSilenceWarning(sessionId, false)
+            }
+        } else if (!isSilenceWarningActive && now - silenceStartMs >= SILENCE_DURATION_MS) {
+            Log.d("RecordingForegroundService", "Silence warning triggered")
+            Log.d("RecordingForegroundService", "Amplitude: $amplitude")
+            isSilenceWarningActive = true
+            recordingRepository.setSilenceWarning(sessionId, true)
+        }
+    }
+
     companion object {
         private const val CHANNEL_ID = "recording_channel"
         private const val NOTIF_ID = 101
@@ -566,5 +593,7 @@ class RecordingForegroundService: Service() {
         const val STATUS_STOPPED_LOW_STORAGE = "STOPPED_LOW_STORAGE"
         const val CALL_STATE_LOG_TAG = "RecordingCallState"
         private const val STORAGE_CHECK_INTERVAL_MS = 10_000L  // check every 10 seconds
+        private const val SILENCE_THRESHOLD = 800  // amplitude below this is considered silent
+        private const val SILENCE_DURATION_MS = 10_000L  // 10 seconds of silence triggers warning
     }
 }
