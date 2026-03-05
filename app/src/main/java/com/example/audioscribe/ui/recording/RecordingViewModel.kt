@@ -75,6 +75,10 @@ class RecordingViewModel @Inject constructor(
     private val _storageError = MutableStateFlow<String?>(null)
     val storageError: StateFlow<String?> = _storageError
 
+    /** True when the microphone has been silent for too long. */
+    private val _silenceWarning = MutableStateFlow(false)
+    val silenceWarning: StateFlow<Boolean> = _silenceWarning
+
     private var summaryJob: Job? = null
 
     // Internal bookkeeping
@@ -88,6 +92,7 @@ class RecordingViewModel @Inject constructor(
 
     private var sessionObserverJob: Job? = null
     private var chunkObserverJob: Job? = null
+    private var silenceObserverJob: Job? = null
 
     // Session-state observer
     fun observeSessionState(sessionId: String) {
@@ -134,6 +139,16 @@ class RecordingViewModel @Inject constructor(
                         _timerText.value = "00:00"
                     }
                 }
+            }
+        }
+    }
+
+    // Silence warning observer
+    private fun startSilenceObserver(sessionId: String) {
+        silenceObserverJob?.cancel()
+        silenceObserverJob = viewModelScope.launch {
+            recordingRepository.observeSilenceWarning(sessionId).collect { detected ->
+                _silenceWarning.value = detected
             }
         }
     }
@@ -272,11 +287,13 @@ class RecordingViewModel @Inject constructor(
         _summaryText.value = ""
         _summaryError.value = null
         _storageError.value = null
+        _silenceWarning.value = false
         summaryJob?.cancel()
 
         sessionId = UUID.randomUUID().toString()
         observeSessionState(sessionId!!)
         startChunkObserver(sessionId!!)
+        startSilenceObserver(sessionId!!)
 
         val intent = Intent(context, RecordingForegroundService::class.java).apply {
             action = RecordingForegroundService.ACTION_START
@@ -345,6 +362,7 @@ class RecordingViewModel @Inject constructor(
         timerJob?.cancel()
         chunkObserverJob?.cancel()
         sessionObserverJob?.cancel()
+        silenceObserverJob?.cancel()
         summaryJob?.cancel()
     }
 

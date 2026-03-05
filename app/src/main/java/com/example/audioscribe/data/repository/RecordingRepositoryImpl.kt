@@ -8,6 +8,7 @@ import com.example.audioscribe.domain.entity.ChunkInfo
 import com.example.audioscribe.domain.repository.RecordingRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -17,6 +18,8 @@ class RecordingRepositoryImpl @Inject constructor(
     private val dao: RecordingDao,
     @ApplicationContext private val context: Context
 ): RecordingRepository {
+
+    private val silenceWarnings = mutableMapOf<String, MutableStateFlow<Boolean>>()
 
     override suspend fun createSession(sessionId: String) {
         dao.upsertSession(
@@ -73,5 +76,13 @@ class RecordingRepositoryImpl @Inject constructor(
         return dao.observeChunks(sessionId).map { entities ->
             entities.map { ChunkInfo(chunkIndex = it.chunkIndex, filePath = it.filePath) }
         }
+    }
+
+    override fun setSilenceWarning(sessionId: String, detected: Boolean) {
+        silenceWarnings.getOrPut(sessionId) { MutableStateFlow(false) }.value = detected
+    }
+
+    override fun observeSilenceWarning(sessionId: String): Flow<Boolean> {
+        return silenceWarnings.getOrPut(sessionId) { MutableStateFlow(false) }
     }
 }

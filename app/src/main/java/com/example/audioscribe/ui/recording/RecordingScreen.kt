@@ -46,6 +46,7 @@ fun RecordingScreen(
     val isSummarizing by viewModel.isSummarizing.collectAsState()
     val summaryError by viewModel.summaryError.collectAsState()
     val storageError by viewModel.storageError.collectAsState()
+    val silenceWarning by viewModel.silenceWarning.collectAsState()
 
     val statusText = when(uiState) {
         RecordingUiState.RECORDING -> "Recording..."
@@ -102,6 +103,23 @@ fun RecordingScreen(
                 ) {
                     Text(
                         text = error,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+
+            // Silence warning banner
+            if (silenceWarning) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Text(
+                        text = "No audio detected \u2013 Check microphone",
                         modifier = Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onErrorContainer
