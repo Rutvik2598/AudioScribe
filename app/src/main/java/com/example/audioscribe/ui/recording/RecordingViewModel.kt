@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audioscribe.data.remote.GeminiTranscriptionService
@@ -200,7 +199,7 @@ class RecordingViewModel @Inject constructor(
                 val pcmBytes = pcmFile.readBytes()
                 val wavBytes = PcmToWavConverter.convert(pcmBytes)
                 Log.d(TAG, "Sending chunk ${chunk.chunkIndex} to Gemini (${pcmBytes.size} PCM bytes)")
-                val text = "Mocked transcription"//transcriptionService.transcribe(wavBytes)
+                val text = "Mocked Transcription" //transcriptionService.transcribe(wavBytes)
                 Log.d(TAG, "Chunk ${chunk.chunkIndex} result: \"$text\"")
 
                 // Only store meaningful transcription (skip empty / whitespace-only results)
@@ -259,7 +258,7 @@ class RecordingViewModel @Inject constructor(
             _isSummarizing.value = true
             _summaryError.value = null
             try {
-                val summary = "Mocked summary" //transcriptionService.summarize(fullTranscription)
+                val summary = "Mocked Summary" //transcriptionService.summarize(fullTranscription)
                 _summaryText.value = summary
             } catch (e: Exception) {
                 Log.e(TAG, "Summary generation failed", e)
@@ -279,7 +278,6 @@ class RecordingViewModel @Inject constructor(
     }
 
     // Recording controls
-    @RequiresApi(Build.VERSION_CODES.O)
     fun startRecording() {
         if(_isRecording.value) return
 
@@ -309,7 +307,11 @@ class RecordingViewModel @Inject constructor(
             action = RecordingForegroundService.ACTION_START
             putExtra(RecordingForegroundService.EXTRA_SESSION_ID, sessionId)
         }
-        context.startForegroundService(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
     }
 
     fun stopRecording() {

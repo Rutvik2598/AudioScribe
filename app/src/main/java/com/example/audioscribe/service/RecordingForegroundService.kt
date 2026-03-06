@@ -23,7 +23,6 @@ import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.example.audioscribe.domain.AudioChunker
 import com.example.audioscribe.domain.AudioStreamer
@@ -40,7 +39,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
-@RequiresApi(Build.VERSION_CODES.O)
 @AndroidEntryPoint
 class RecordingForegroundService: Service() {
 
@@ -58,6 +56,7 @@ class RecordingForegroundService: Service() {
     private var phoneStateCallback: TelephonyCallback? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var audioFocusChangeListener: AudioManager.OnAudioFocusChangeListener? = null
     private var wasRecordingBeforePhoneCall = false
     private var isPausedByPhoneCall = false
     private var wasRecordingBeforeAudioFocusLoss = false
@@ -113,7 +112,6 @@ class RecordingForegroundService: Service() {
         )
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun resumeRecording() {
         if (recordingJob != null) return
 
@@ -143,7 +141,6 @@ class RecordingForegroundService: Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun pauseRecordingInternal(
         sessionStatus: String,
         notificationStatus: String,
@@ -249,7 +246,6 @@ class RecordingForegroundService: Service() {
      * Stops recording because of low storage.
      * Flushes current chunk, sets session status to STOPPED_LOW_STORAGE.
      */
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun stopRecordingLowStorage() {
         stopRecordingPipeline(flushChunk = true)
         abandonAudioFocus()
@@ -278,7 +274,6 @@ class RecordingForegroundService: Service() {
         TODO("Not yet implemented")
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     override fun onDestroy() {
         storageMonitorJob?.cancel()
         unregisterPhoneStateListener()
@@ -291,7 +286,6 @@ class RecordingForegroundService: Service() {
     @SuppressLint("ForegroundServiceType")
     private var chunker: AudioChunker? = null
 
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun startRecording(intent: Intent?) {
         if(recordingJob != null) return
 
@@ -342,7 +336,6 @@ class RecordingForegroundService: Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun stopRecording() {
         stopRecordingPipeline(flushChunk = true)
         abandonAudioFocus()
@@ -439,32 +432,47 @@ class RecordingForegroundService: Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
+    @Suppress("DEPRECATION")
     private fun requestAudioFocus(): Boolean {
         val manager = audioManager ?: return false
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .build()
+        val listener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            handleAudioFocusChanged(focusChange)
+        }
+        audioFocusChangeListener = listener
 
-        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(audioAttributes)
-            .setOnAudioFocusChangeListener { focusChange ->
-                handleAudioFocusChanged(focusChange)
-            }
-            .setAcceptsDelayedFocusGain(true)
-            .build()
-
-        audioFocusRequest = focusRequest
-        return manager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(audioAttributes)
+                .setOnAudioFocusChangeListener(listener)
+                .setAcceptsDelayedFocusGain(true)
+                .build()
+            audioFocusRequest = focusRequest
+            manager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            manager.requestAudioFocus(
+                listener,
+                AudioManager.STREAM_VOICE_CALL,
+                AudioManager.AUDIOFOCUS_GAIN
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
+    @Suppress("DEPRECATION")
     private fun abandonAudioFocus() {
         val manager = audioManager ?: return
-        val focusRequest = audioFocusRequest ?: return
-        manager.abandonAudioFocusRequest(focusRequest)
-        audioFocusRequest = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val focusRequest = audioFocusRequest ?: return
+            manager.abandonAudioFocusRequest(focusRequest)
+            audioFocusRequest = null
+        } else {
+            val listener = audioFocusChangeListener ?: return
+            manager.abandonAudioFocus(listener)
+        }
+        audioFocusChangeListener = null
     }
 
     private fun handleAudioFocusChanged(focusChange: Int) {
@@ -551,7 +559,7 @@ class RecordingForegroundService: Service() {
     }
 
     private fun createNotificationChannel() {
-        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Recording",

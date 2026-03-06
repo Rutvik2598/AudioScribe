@@ -1,7 +1,5 @@
 package com.example.audioscribe.ui.recording
 
-import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -57,7 +55,6 @@ import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
-@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun RecordingScreen(
     onBack: () -> Unit,
@@ -128,15 +125,6 @@ fun RecordingScreen(
                         shape = RoundedCornerShape(28.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = TealDark)
                     ) {
-                        Icon(
-                            painter = androidx.compose.ui.res.painterResource(
-                                id = android.R.drawable.ic_media_pause
-                            ),
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = timerText,
                             color = Color.White,
