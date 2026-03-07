@@ -22,7 +22,7 @@
     <string name="recording_silence_warning">No audio detected – Check microphone</string>
     <string name="tab_transcript">Transcript</string>
     <string name="tab_summary">Summary</string>
-    <string name="recording_transcript_placeholder">The transcript will update every 60s, it will appear here automatically as you speak</string>
+    <string name="recording_transcript_placeholder">The transcript will update every 30s, it will appear here automatically as you speak</string>
     <string name="recording_summary_placeholder">Summary will appear here once transcription is available.</string>
 
     <!-- RecordingViewModel (user-facing error messages) -->
