@@ -24,7 +24,7 @@ class StorageHelper @Inject constructor() {
     }
 
     /** Returns the number of available bytes on the internal storage. */
-    fun getAvailableBytes(context: Context): Long {
+    private fun getAvailableBytes(context: Context): Long {
         val stat = StatFs(context.filesDir.absolutePath)
         return stat.availableBlocksLong * stat.blockSizeLong
     }

@@ -29,12 +29,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.audioscribe.R
 import com.example.audioscribe.ui.theme.BackgroundColor
 import com.example.audioscribe.ui.theme.OrangeAccent
 import com.example.audioscribe.ui.theme.TealDark
@@ -53,7 +55,7 @@ fun RecordingDetailScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Recording Details",
+                        text = stringResource(R.string.detail_title),
                         color = TealDark,
                         fontWeight = FontWeight.Bold
                     )
@@ -62,7 +64,7 @@ fun RecordingDetailScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                             tint = TealDark
                         )
                     }
@@ -130,7 +132,7 @@ private fun SectionCard(title: String, content: String?) {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = content ?: "Not available yet.",
+                text = content ?: stringResource(R.string.detail_not_available),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (content != null) TealDark else Color.Gray
             )

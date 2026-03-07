@@ -9,5 +9,6 @@ data class RecordingSessionEntity(
     val createdAtMs: Long,
     val status: String, // "RECORDING", "STOPPED", "PAUSED"
     val transcription: String? = null,
-    val summary: String? = null
+    val summary: String? = null,
+    val elapsedMs: Long = 0
 )

@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
@@ -35,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,10 +60,10 @@ fun HomeScreen(
             TopAppBar(
                 title = {},
                 navigationIcon = {
-                    IconButton(onClick = { /* Drawer / menu action - to be added later */ }) {
+                    IconButton(onClick = { }) {
                         Icon(
                             imageVector = Icons.Default.Menu,
-                            contentDescription = "Menu",
+                            contentDescription = stringResource(R.string.cd_menu),
                             tint = TealDark
                         )
                     }
@@ -73,6 +77,7 @@ fun HomeScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
                 Button(
@@ -90,7 +95,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(
-                        text = "Capture Notes",
+                        text = stringResource(R.string.home_capture_notes),
                         color = BackgroundColor,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold
@@ -111,7 +116,7 @@ fun HomeScreen(
                 modifier = Modifier.padding(horizontal = 24.dp)
             ) {
                 Text(
-                    text = "Capture memories using AudioScribe on your Desktop ",
+                    text = stringResource(R.string.home_tagline),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = TealDark
@@ -130,7 +135,7 @@ fun HomeScreen(
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.mountain),
-                    contentDescription = "Scenic landscape",
+                    contentDescription = stringResource(R.string.cd_hero_image),
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
@@ -175,14 +180,14 @@ fun HomeScreen(
                     modifier = Modifier.padding(20.dp)
                 ) {
                     Text(
-                        text = "Notes & Chats",
+                        text = stringResource(R.string.home_notes_chats),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TealDark
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "View Memories >",
+                        text = stringResource(R.string.home_view_memories),
                         style = MaterialTheme.typography.bodyMedium,
                         color = OrangeAccent
                     )
@@ -193,7 +198,7 @@ fun HomeScreen(
 
             // Coming Up / Meetings section placeholder
             Text(
-                text = "Coming Up",
+                text = stringResource(R.string.home_coming_up),
                 modifier = Modifier.padding(horizontal = 24.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
@@ -208,7 +213,7 @@ fun HomeScreen(
                 colors = CardDefaults.cardColors(containerColor = Color.White)
             ) {
                 Text(
-                    text = "No upcoming meetings",
+                    text = stringResource(R.string.home_no_upcoming_meetings),
                     modifier = Modifier.padding(20.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.Gray

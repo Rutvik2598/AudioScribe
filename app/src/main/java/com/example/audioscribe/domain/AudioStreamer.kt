@@ -3,6 +3,7 @@ package com.example.audioscribe.domain
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import com.example.audioscribe.domain.entity.AudioPacket
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -45,7 +46,7 @@ class AudioStreamer @Inject constructor() {
 
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "AudioRecord error", e)
         } finally {
             audioRecord.stop()
             audioRecord.release()
@@ -64,6 +65,7 @@ class AudioStreamer @Inject constructor() {
 
 
     private companion object {
+        const val TAG = "AudioStreamer"
         const val SAMPLE_RATE = 16000
         const val BUFFER_SIZE = 3200
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO

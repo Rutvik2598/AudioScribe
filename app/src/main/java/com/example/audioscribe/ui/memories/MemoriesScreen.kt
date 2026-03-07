@@ -31,10 +31,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.audioscribe.R
 import com.example.audioscribe.domain.entity.RecordingSession
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -53,14 +55,15 @@ fun MemoriesScreen(
     viewModel: MemoriesViewModel = hiltViewModel()
 ) {
     val sessions by viewModel.sessions.collectAsState()
-    val grouped = groupByDate(sessions)
+    val todayLabel = stringResource(R.string.memories_today)
+    val grouped = groupByDate(sessions, todayLabel)
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        text = "Memories",
+                        text = stringResource(R.string.memories_title),
                         fontWeight = FontWeight.Bold,
                         color = TealDark
                     )
@@ -69,7 +72,7 @@ fun MemoriesScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                             tint = TealDark
                         )
                     }
@@ -92,7 +95,7 @@ fun MemoriesScreen(
                 FilterChip(
                     selected = true,
                     onClick = { },
-                    label = { Text("Notes") },
+                    label = { Text(stringResource(R.string.memories_filter_notes)) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = TealLight,
                         selectedLabelColor = TealDark
@@ -109,7 +112,7 @@ fun MemoriesScreen(
                         colors = CardDefaults.cardColors(containerColor = Color.White)
                     ) {
                         Text(
-                            text = "No recordings yet.",
+                            text = stringResource(R.string.memories_no_recordings),
                             modifier = Modifier.padding(20.dp),
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.Gray
@@ -161,7 +164,7 @@ private fun MemoryItem(session: RecordingSession, onClick: () -> Unit) {
                 Text(
                     text = session.summary?.take(40)
                         ?: session.transcription?.take(40)
-                        ?: "Untitled Meeting",
+                        ?: stringResource(R.string.memories_untitled),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = TealDark,
@@ -169,8 +172,9 @@ private fun MemoryItem(session: RecordingSession, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
+                val durationMin = session.elapsedMs / 60_000
                 Text(
-                    text = timeFormat.format(Date(session.createdAtMs)) + " \u00B7 0m",
+                    text = stringResource(R.string.memories_duration_format, timeFormat.format(Date(session.createdAtMs)), durationMin),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
@@ -179,7 +183,7 @@ private fun MemoryItem(session: RecordingSession, onClick: () -> Unit) {
     }
 }
 
-private fun groupByDate(sessions: List<RecordingSession>): List<Pair<String, List<RecordingSession>>> {
+private fun groupByDate(sessions: List<RecordingSession>, todayLabel: String): List<Pair<String, List<RecordingSession>>> {
     val calendar = Calendar.getInstance()
     val today = calendar.clone() as Calendar
 
@@ -188,7 +192,7 @@ private fun groupByDate(sessions: List<RecordingSession>): List<Pair<String, Lis
     return sessions.groupBy { session ->
         calendar.timeInMillis = session.createdAtMs
         when {
-            isSameDay(calendar, today) -> "Today"
+            isSameDay(calendar, today) -> todayLabel
             else -> dateFormat.format(Date(session.createdAtMs))
         }
     }.toList()

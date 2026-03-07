@@ -3,12 +3,15 @@ package com.example.audioscribe.ui.recording
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -42,11 +45,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.audioscribe.R
 import com.example.audioscribe.ui.theme.BackgroundColor
 import com.example.audioscribe.ui.theme.OrangeAccent
 import com.example.audioscribe.ui.theme.TealDark
@@ -79,7 +84,7 @@ fun RecordingScreen(
 
     // Tab state
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    val tabs = listOf("Transcript", "Summary")
+    val tabs = listOf(stringResource(R.string.tab_transcript), stringResource(R.string.tab_summary))
 
     // Auto-scroll for transcription
     val transcriptionScrollState = rememberScrollState()
@@ -101,7 +106,7 @@ fun RecordingScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                             tint = TealDark
                         )
                     }
@@ -113,6 +118,7 @@ fun RecordingScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
                 if (isRecording) {
@@ -133,7 +139,7 @@ fun RecordingScreen(
                         )
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(
-                            text = "\u25A0  Stop",
+                            text = stringResource(R.string.recording_stop),
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold
@@ -156,7 +162,7 @@ fun RecordingScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Start Recording",
+                            text = stringResource(R.string.recording_start),
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold
@@ -176,8 +182,8 @@ fun RecordingScreen(
         ) {
             // Title
             Text(
-                text = if (isRecording) "I'm listening and taking notes..."
-                else "Start capturing by pressing play button",
+                text = if (isRecording) stringResource(R.string.recording_listening)
+                else stringResource(R.string.recording_start_prompt),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 fontStyle = if (isRecording) FontStyle.Italic else FontStyle.Normal,
@@ -221,7 +227,7 @@ fun RecordingScreen(
                     color = MaterialTheme.colorScheme.errorContainer
                 ) {
                     Text(
-                        text = "No audio detected \u2013 Check microphone",
+                        text = stringResource(R.string.recording_silence_warning),
                         modifier = Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onErrorContainer
@@ -299,7 +305,7 @@ fun RecordingScreen(
                             }
                             if (!isTranscribing && transcription.isEmpty() && transcriptionError == null) {
                                 Text(
-                                    text = "The transcript will update every 60s, it will appear here automatically as you speak",
+                                    text = stringResource(R.string.recording_transcript_placeholder),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Color.Gray
                                 )
@@ -338,7 +344,7 @@ fun RecordingScreen(
                             }
                             if (!isSummarizing && summary.isEmpty() && summaryError == null) {
                                 Text(
-                                    text = "Summary will appear here once transcription is available.",
+                                    text = stringResource(R.string.recording_summary_placeholder),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Color.Gray
                                 )

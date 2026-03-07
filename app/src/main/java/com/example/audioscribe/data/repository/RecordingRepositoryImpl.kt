@@ -10,6 +10,7 @@ import com.example.audioscribe.domain.repository.RecordingRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -33,18 +34,14 @@ class RecordingRepositoryImpl @Inject constructor(
     }
 
     override suspend fun updateSessionStatus(sessionId: String, status: String) {
-        val session = RecordingSessionEntity(
-            sessionId = sessionId,
-            createdAtMs = System.currentTimeMillis(),
-            status = status
-        )
-        dao.upsertSession(session)
+        dao.updateSessionStatus(sessionId, status)
     }
 
     override fun observeSessionStatus(sessionId: String): Flow<String> {
         return dao.observeSession(sessionId)
             .filterNotNull()
             .map { it.status }
+            .distinctUntilChanged()
     }
 
     override suspend fun saveChunk(
@@ -101,11 +98,36 @@ class RecordingRepositoryImpl @Inject constructor(
         return dao.observeSession(sessionId).map { it?.toDomain() }
     }
 
+    override suspend fun findActiveSession(): RecordingSession? {
+        return dao.findActiveSession()?.toDomain()
+    }
+
+    override suspend fun updateElapsedMs(sessionId: String, elapsedMs: Long) {
+        dao.updateElapsedMs(sessionId, elapsedMs)
+    }
+
+    override suspend fun updateChunkTranscription(sessionId: String, chunkIndex: Int, text: String) {
+        dao.updateChunkTranscription(sessionId, chunkIndex, text)
+    }
+
+    override suspend fun getUntranscribedChunks(sessionId: String): List<ChunkInfo> {
+        return dao.getUntranscribedChunks(sessionId).map {
+            ChunkInfo(chunkIndex = it.chunkIndex, filePath = it.filePath)
+        }
+    }
+
+    override suspend fun getTranscribedChunks(sessionId: String): List<Pair<Int, String>> {
+        return dao.getTranscribedChunks(sessionId).map {
+            it.chunkIndex to (it.transcriptionText ?: "")
+        }
+    }
+
     private fun RecordingSessionEntity.toDomain() = RecordingSession(
         sessionId = sessionId,
         createdAtMs = createdAtMs,
         status = status,
         transcription = transcription,
-        summary = summary
+        summary = summary,
+        elapsedMs = elapsedMs
     )
 }

@@ -11,5 +11,6 @@ data class AudioChunkEntity(
     val startTimeMs: Long,
     val endTimeMs: Long,
     val avgAmplitude: Int,
-    val filePath: String
+    val filePath: String,
+    val transcriptionText: String? = null
 )

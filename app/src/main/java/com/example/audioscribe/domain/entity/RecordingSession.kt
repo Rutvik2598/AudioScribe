@@ -5,5 +5,6 @@ data class RecordingSession(
     val createdAtMs: Long,
     val status: String,
     val transcription: String?,
-    val summary: String?
+    val summary: String?,
+    val elapsedMs: Long = 0
 )

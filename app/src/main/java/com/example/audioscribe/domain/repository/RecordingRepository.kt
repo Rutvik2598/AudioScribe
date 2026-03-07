@@ -31,4 +31,14 @@ interface RecordingRepository {
     fun observeAllSessions(): Flow<List<RecordingSession>>
 
     fun observeSession(sessionId: String): Flow<RecordingSession?>
+
+    suspend fun findActiveSession(): RecordingSession?
+
+    suspend fun updateElapsedMs(sessionId: String, elapsedMs: Long)
+
+    suspend fun updateChunkTranscription(sessionId: String, chunkIndex: Int, text: String)
+
+    suspend fun getUntranscribedChunks(sessionId: String): List<ChunkInfo>
+
+    suspend fun getTranscribedChunks(sessionId: String): List<Pair<Int, String>>
 }
