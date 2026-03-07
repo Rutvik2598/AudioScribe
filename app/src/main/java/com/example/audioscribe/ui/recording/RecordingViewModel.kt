@@ -4,15 +4,18 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.example.audioscribe.data.remote.GeminiTranscriptionService
 import com.example.audioscribe.domain.PcmToWavConverter
 import com.example.audioscribe.domain.StorageHelper
 import com.example.audioscribe.domain.entity.ChunkInfo
 import com.example.audioscribe.domain.repository.RecordingRepository
 import com.example.audioscribe.service.RecordingForegroundService
+import com.example.audioscribe.worker.SessionTerminationWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -20,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import com.example.audioscribe.R
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
@@ -38,9 +42,6 @@ class RecordingViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(RecordingUiState.IDLE)
     val uiState: StateFlow<RecordingUiState> = _uiState
-
-    private val _isRecording = MutableStateFlow(false)
-    val isRecording: StateFlow<Boolean> = _isRecording
 
     private val _timerText = MutableStateFlow("00:00")
     val timeText: StateFlow<String> = _timerText
@@ -94,6 +95,54 @@ class RecordingViewModel @Inject constructor(
     private var chunkObserverJob: Job? = null
     private var silenceObserverJob: Job? = null
 
+    init {
+        // On construction, check if there's an active recording session to recover
+        viewModelScope.launch {
+            val activeSession = recordingRepository.findActiveSession()
+            if (activeSession != null) {
+                sessionId = activeSession.sessionId
+
+                // Restore per-chunk transcription state from Room
+                val transcribedChunks = recordingRepository.getTranscribedChunks(activeSession.sessionId)
+                for ((index, text) in transcribedChunks) {
+                    transcriptions[index] = text
+                    if (index > transcribedUpTo) transcribedUpTo = index
+                }
+                if (transcriptions.isNotEmpty()) {
+                    _transcriptionText.value = transcriptions.entries
+                        .sortedBy { it.key }
+                        .joinToString(" ") { it.value }
+                }
+
+                // Restore persisted text if chunk-level data was empty
+                if (_transcriptionText.value.isBlank()) {
+                    _transcriptionText.value = activeSession.transcription ?: ""
+                }
+                _summaryText.value = activeSession.summary ?: ""
+
+                if (RecordingForegroundService.isRunning) {
+                    // Service is alive — read elapsed from service (single source of truth)
+                    elapsedTimeBeforePause = RecordingForegroundService.getElapsedMs() / 1000
+                    observeSessionState(activeSession.sessionId)
+                    startChunkObserver(activeSession.sessionId)
+                    startSilenceObserver(activeSession.sessionId)
+                } else {
+                    // Service is dead (process death or force-close)
+                    // Enqueue a worker to finalize untranscribed chunks
+                    enqueueTerminationWorker(activeSession.sessionId)
+                    _uiState.value = RecordingUiState.STOPPED
+                }
+            }
+        }
+    }
+
+    private fun enqueueTerminationWorker(sessionId: String) {
+        val workRequest = OneTimeWorkRequestBuilder<SessionTerminationWorker>()
+            .setInputData(workDataOf(SessionTerminationWorker.KEY_SESSION_ID to sessionId))
+            .build()
+        WorkManager.getInstance(context).enqueue(workRequest)
+    }
+
     // Session-state observer
     fun observeSessionState(sessionId: String) {
         sessionObserverJob?.cancel()
@@ -102,39 +151,34 @@ class RecordingViewModel @Inject constructor(
                 when (status) {
                     "RECORDING" -> {
                         _uiState.value = RecordingUiState.RECORDING
-                        _isRecording.value = true
                         startTimer(resume = true)
                     }
                     "PAUSED" -> {
                         _uiState.value = RecordingUiState.PAUSED
-                        _isRecording.value = false
                         stopTimer(storeElapsed = true)
                     }
                     "PAUSED_PHONE_CALL" -> {
                         _uiState.value = RecordingUiState.PAUSED_PHONE_CALL
-                        _isRecording.value = false
                         stopTimer(storeElapsed = true)
                     }
                     "PAUSED_AUDIO_FOCUS" -> {
                         _uiState.value = RecordingUiState.PAUSED_AUDIO_FOCUS
-                        _isRecording.value = false
                         stopTimer(storeElapsed = true)
                     }
                     "STOPPED" -> {
                         _uiState.value = RecordingUiState.STOPPED
-                        _isRecording.value = false
                         stopTimer()
                         _timerText.value = "00:00"
+                        persistTranscriptionAndSummary(sessionId)
                     }
                     "STOPPED_LOW_STORAGE" -> {
                         _uiState.value = RecordingUiState.STOPPED
-                        _isRecording.value = false
                         stopTimer()
-                        _storageError.value = "Recording stopped \u2013 Low storage"
+                        _storageError.value = context.getString(R.string.error_recording_stopped_low_storage)
+                        persistTranscriptionAndSummary(sessionId)
                     }
                     else -> {
                         _uiState.value = RecordingUiState.IDLE
-                        _isRecording.value = false
                         stopTimer()
                         _timerText.value = "00:00"
                     }
@@ -198,12 +242,16 @@ class RecordingViewModel @Inject constructor(
                 val pcmBytes = pcmFile.readBytes()
                 val wavBytes = PcmToWavConverter.convert(pcmBytes)
                 Log.d(TAG, "Sending chunk ${chunk.chunkIndex} to Gemini (${pcmBytes.size} PCM bytes)")
-                val text = "Mocked transcription"//transcriptionService.transcribe(wavBytes)
+                val text = transcriptionService.transcribe(wavBytes)
                 Log.d(TAG, "Chunk ${chunk.chunkIndex} result: \"$text\"")
 
                 // Only store meaningful transcription (skip empty / whitespace-only results)
                 if (text.isNotBlank()) {
                     transcriptions[chunk.chunkIndex] = text
+                    // Persist per-chunk transcription to Room for recovery
+                    sessionId?.let { sid ->
+                        recordingRepository.updateChunkTranscription(sid, chunk.chunkIndex, text)
+                    }
                 }
                 transcribedUpTo = chunk.chunkIndex
                 rebuildTranscriptionText()
@@ -231,7 +279,7 @@ class RecordingViewModel @Inject constructor(
             val success = transcribeWithRetry(chunk)
             if (!success) {
                 _transcriptionError.value =
-                    "Transcription failed after retries. Check your network and API key."
+                    context.getString(R.string.error_transcription_failed)
                 return
             }
         }
@@ -257,25 +305,32 @@ class RecordingViewModel @Inject constructor(
             _isSummarizing.value = true
             _summaryError.value = null
             try {
-                val summary = "Mocked summary" //transcriptionService.summarize(fullTranscription)
+                val summary = transcriptionService.summarize(fullTranscription)
                 _summaryText.value = summary
             } catch (e: Exception) {
                 Log.e(TAG, "Summary generation failed", e)
-                _summaryError.value = "Failed to generate summary."
+                _summaryError.value = context.getString(R.string.error_summary_failed)
             } finally {
                 _isSummarizing.value = false
             }
         }
     }
 
+    private fun persistTranscriptionAndSummary(sessionId: String) {
+        viewModelScope.launch {
+            val transcription = _transcriptionText.value.takeIf { it.isNotBlank() }
+            val summary = _summaryText.value.takeIf { it.isNotBlank() }
+            recordingRepository.saveTranscriptionAndSummary(sessionId, transcription, summary)
+        }
+    }
+
     // Recording controls
-    @RequiresApi(Build.VERSION_CODES.O)
     fun startRecording() {
-        if(_isRecording.value) return
+        if(_uiState.value != RecordingUiState.IDLE && _uiState.value != RecordingUiState.STOPPED) return
 
         // Check storage before starting
         if (!storageHelper.hasEnoughStorageToStart(context)) {
-            _storageError.value = "Cannot start recording \u2013 Low storage"
+            _storageError.value = context.getString(R.string.error_cannot_start_low_storage)
             return
         }
 
@@ -299,31 +354,17 @@ class RecordingViewModel @Inject constructor(
             action = RecordingForegroundService.ACTION_START
             putExtra(RecordingForegroundService.EXTRA_SESSION_ID, sessionId)
         }
-        context.startForegroundService(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
     }
 
     fun stopRecording() {
         if (_uiState.value == RecordingUiState.IDLE || _uiState.value == RecordingUiState.STOPPED) return
         val intent = Intent(context, RecordingForegroundService::class.java).apply {
             action = RecordingForegroundService.ACTION_STOP
-        }
-        context.startService(intent)
-    }
-
-    fun pauseRecording() {
-        if (sessionId == null || _uiState.value != RecordingUiState.RECORDING) return
-        val intent = Intent(context, RecordingForegroundService::class.java).apply {
-            action = RecordingForegroundService.ACTION_PAUSE
-            putExtra(RecordingForegroundService.EXTRA_SESSION_ID, sessionId)
-        }
-        context.startService(intent)
-    }
-
-    fun resumeRecording() {
-        if (sessionId == null || _uiState.value != RecordingUiState.PAUSED) return
-        val intent = Intent(context, RecordingForegroundService::class.java).apply {
-            action = RecordingForegroundService.ACTION_RESUME
-            putExtra(RecordingForegroundService.EXTRA_SESSION_ID, sessionId)
         }
         context.startService(intent)
     }
@@ -371,13 +412,4 @@ class RecordingViewModel @Inject constructor(
         const val MAX_RETRY_ATTEMPTS = 3
         const val RETRY_BACKOFF_MS = 2_000L
     }
-}
-
-enum class RecordingUiState {
-    IDLE,
-    RECORDING,
-    PAUSED,
-    PAUSED_PHONE_CALL,
-    PAUSED_AUDIO_FOCUS,
-    STOPPED
 }

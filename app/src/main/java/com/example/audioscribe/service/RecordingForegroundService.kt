@@ -23,7 +23,6 @@ import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.example.audioscribe.domain.AudioChunker
 import com.example.audioscribe.domain.AudioStreamer
@@ -40,7 +39,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
-@RequiresApi(Build.VERSION_CODES.O)
 @AndroidEntryPoint
 class RecordingForegroundService: Service() {
 
@@ -51,6 +49,7 @@ class RecordingForegroundService: Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recordingJob: Job? = null
     private var storageMonitorJob: Job? = null
+    private var elapsedPersistJob: Job? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var telephonyManager: TelephonyManager? = null
@@ -58,12 +57,17 @@ class RecordingForegroundService: Service() {
     private var phoneStateCallback: TelephonyCallback? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var audioFocusChangeListener: AudioManager.OnAudioFocusChangeListener? = null
     private var wasRecordingBeforePhoneCall = false
     private var isPausedByPhoneCall = false
     private var wasRecordingBeforeAudioFocusLoss = false
     private var isPausedByAudioFocusLoss = false
     private var silenceStartMs: Long = 0L
     private var isSilenceWarningActive = false
+
+    // Live update timer tracking
+    private var segmentStartTimeMs: Long = 0L
+    private var elapsedAtPauseMs: Long = 0L
 
     private var headsetReceiver: BroadcastReceiver? = null
 
@@ -83,6 +87,10 @@ class RecordingForegroundService: Service() {
             ACTION_STOP -> stopRecording()
             ACTION_PAUSE -> pauseRecording()
             ACTION_RESUME -> resumeRecording()
+            else -> {
+                // Null action = service restarted after process death (START_STICKY)
+                handleProcessDeathRestart()
+            }
         }
         return START_STICKY
     }
@@ -113,7 +121,6 @@ class RecordingForegroundService: Service() {
         )
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun resumeRecording() {
         if (recordingJob != null) return
 
@@ -130,12 +137,16 @@ class RecordingForegroundService: Service() {
             return
         }
 
+        segmentStartTimeMs = System.currentTimeMillis()
+        syncStaticElapsed()
+
         serviceScope.launch {
             updateStatusAndNotification(
                 status = "RECORDING",
                 notificationText = "Recording..."
             )
             startRecordingPipeline()
+            syncStaticElapsed()
             isPausedByPhoneCall = false
             isPausedByAudioFocusLoss = false
             wasRecordingBeforePhoneCall = false
@@ -143,16 +154,20 @@ class RecordingForegroundService: Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun pauseRecordingInternal(
         sessionStatus: String,
         notificationStatus: String,
         showResumeAction: Boolean = false
     ) {
         if (recordingJob == null) return
+        elapsedAtPauseMs += System.currentTimeMillis() - segmentStartTimeMs
+        sIsActivelyRecording = false
+        sElapsedAtPauseMs = elapsedAtPauseMs
         stopRecordingPipeline(flushChunk = false)
         abandonAudioFocus()
         serviceScope.launch {
+            // Persist elapsed time on pause
+            recordingRepository.updateElapsedMs(sessionId, elapsedAtPauseMs)
             updateStatusAndNotification(
                 status = sessionStatus,
                 notificationText = notificationStatus,
@@ -191,15 +206,21 @@ class RecordingForegroundService: Service() {
                         chunk.avgAmplitude,
                         chunk.bytes
                     )
+                    // Persist elapsed time with each chunk for process death recovery
+                    val currentElapsed = elapsedAtPauseMs + (System.currentTimeMillis() - segmentStartTimeMs)
+                    recordingRepository.updateElapsedMs(sessionId, currentElapsed)
                 }
             }
         }
         startStorageMonitor()
+        startElapsedPersistJob()
     }
 
     private fun stopRecordingPipeline(flushChunk: Boolean) {
         storageMonitorJob?.cancel()
         storageMonitorJob = null
+        elapsedPersistJob?.cancel()
+        elapsedPersistJob = null
         // Clear silence warning when pipeline stops
         if (isSilenceWarningActive) {
             isSilenceWarningActive = false
@@ -249,7 +270,6 @@ class RecordingForegroundService: Service() {
      * Stops recording because of low storage.
      * Flushes current chunk, sets session status to STOPPED_LOW_STORAGE.
      */
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun stopRecordingLowStorage() {
         stopRecordingPipeline(flushChunk = true)
         abandonAudioFocus()
@@ -257,6 +277,8 @@ class RecordingForegroundService: Service() {
         wasRecordingBeforePhoneCall = false
         isPausedByAudioFocusLoss = false
         wasRecordingBeforeAudioFocusLoss = false
+        isRunning = false
+        sIsActivelyRecording = false
 
         wakeLock?.let {
             if (it.isHeld) it.release()
@@ -270,33 +292,88 @@ class RecordingForegroundService: Service() {
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIF_ID, buildNotification("Stopped – Low storage"))
 
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    override fun onBind(p0: Intent?): IBinder? {
-        TODO("Not yet implemented")
-    }
+    override fun onBind(p0: Intent?): IBinder? = null
 
-    @RequiresApi(Build.VERSION_CODES.O)
     override fun onDestroy() {
         storageMonitorJob?.cancel()
+        elapsedPersistJob?.cancel()
         unregisterPhoneStateListener()
         unregisterHeadsetReceiver()
         abandonAudioFocus()
+        isRunning = false
+        sIsActivelyRecording = false
         super.onDestroy()
         serviceScope.cancel()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Persist elapsed time when user swipes app from recents
+        if (::sessionId.isInitialized) {
+            val currentElapsed = if (recordingJob != null) {
+                elapsedAtPauseMs + (System.currentTimeMillis() - segmentStartTimeMs)
+            } else {
+                elapsedAtPauseMs
+            }
+            runBlocking {
+                recordingRepository.updateElapsedMs(sessionId, currentElapsed)
+            }
+        }
     }
 
     @SuppressLint("ForegroundServiceType")
     private var chunker: AudioChunker? = null
 
-    @RequiresApi(Build.VERSION_CODES.O)
+    /** Keep static elapsed state in sync with instance fields. */
+    private fun syncStaticElapsed() {
+        sElapsedAtPauseMs = elapsedAtPauseMs
+        sSegmentStartTimeMs = segmentStartTimeMs
+        sIsActivelyRecording = recordingJob != null
+    }
+
+    /**
+     * Periodically persists elapsed recording time to Room so it survives process death.
+     */
+    private fun startElapsedPersistJob() {
+        elapsedPersistJob?.cancel()
+        elapsedPersistJob = serviceScope.launch {
+            while (true) {
+                delay(10_000L) // every 10 seconds
+                if (recordingJob != null && ::sessionId.isInitialized) {
+                    val currentElapsed = elapsedAtPauseMs + (System.currentTimeMillis() - segmentStartTimeMs)
+                    recordingRepository.updateElapsedMs(sessionId, currentElapsed)
+                }
+            }
+        }
+    }
+
+    /**
+     * Called when the service is restarted after process death (null intent from START_STICKY).
+     * Marks any orphaned sessions as STOPPED so the termination worker can finalize them.
+     */
+    private fun handleProcessDeathRestart() {
+        serviceScope.launch {
+            val activeSession = recordingRepository.findActiveSession()
+            if (activeSession != null) {
+                // The recording pipeline was lost in process death; mark session stopped
+                recordingRepository.updateSessionStatus(activeSession.sessionId, "STOPPED")
+            }
+            // No active pipeline to continue — stop ourselves
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
     private fun startRecording(intent: Intent?) {
         if(recordingJob != null) return
 
         // Get sessionId from Intent
         sessionId = intent?.getStringExtra(EXTRA_SESSION_ID).toString()
+        isRunning = true
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
@@ -305,6 +382,9 @@ class RecordingForegroundService: Service() {
         )
         wakeLock?.acquire(1 * 60 * 60 * 1000L /*1 hour*/)
 
+        segmentStartTimeMs = System.currentTimeMillis()
+        elapsedAtPauseMs = 0L
+        syncStaticElapsed()
 
         ServiceCompat.startForeground(
             this,
@@ -326,6 +406,7 @@ class RecordingForegroundService: Service() {
                     notificationText = "Recording..."
                 )
                 startRecordingPipeline()
+                syncStaticElapsed()
                 isPausedByPhoneCall = false
                 isPausedByAudioFocusLoss = false
                 wasRecordingBeforePhoneCall = false
@@ -342,7 +423,6 @@ class RecordingForegroundService: Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     private fun stopRecording() {
         stopRecordingPipeline(flushChunk = true)
         abandonAudioFocus()
@@ -350,6 +430,8 @@ class RecordingForegroundService: Service() {
         wasRecordingBeforePhoneCall = false
         isPausedByAudioFocusLoss = false
         wasRecordingBeforeAudioFocusLoss = false
+        isRunning = false
+        sIsActivelyRecording = false
 
         wakeLock?.let {
             if (it.isHeld) {
@@ -358,8 +440,10 @@ class RecordingForegroundService: Service() {
         }
         wakeLock = null
 
-        // Update session status to STOPPED
+        // Persist final elapsed time and update session status
         runBlocking {
+            val finalElapsed = elapsedAtPauseMs + (System.currentTimeMillis() - segmentStartTimeMs)
+            recordingRepository.updateElapsedMs(sessionId, finalElapsed)
             recordingRepository.updateSessionStatus(sessionId, "STOPPED")
         }
 
@@ -368,7 +452,7 @@ class RecordingForegroundService: Service() {
         notificationManager.notify(NOTIF_ID, buildNotification("Stopped"))
 
         // Remove foreground status and stop service after a short delay
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
@@ -439,32 +523,47 @@ class RecordingForegroundService: Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
+    @Suppress("DEPRECATION")
     private fun requestAudioFocus(): Boolean {
         val manager = audioManager ?: return false
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .build()
+        val listener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            handleAudioFocusChanged(focusChange)
+        }
+        audioFocusChangeListener = listener
 
-        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(audioAttributes)
-            .setOnAudioFocusChangeListener { focusChange ->
-                handleAudioFocusChanged(focusChange)
-            }
-            .setAcceptsDelayedFocusGain(true)
-            .build()
-
-        audioFocusRequest = focusRequest
-        return manager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(audioAttributes)
+                .setOnAudioFocusChangeListener(listener)
+                .setAcceptsDelayedFocusGain(true)
+                .build()
+            audioFocusRequest = focusRequest
+            manager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            manager.requestAudioFocus(
+                listener,
+                AudioManager.STREAM_VOICE_CALL,
+                AudioManager.AUDIOFOCUS_GAIN
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
+    @Suppress("DEPRECATION")
     private fun abandonAudioFocus() {
         val manager = audioManager ?: return
-        val focusRequest = audioFocusRequest ?: return
-        manager.abandonAudioFocusRequest(focusRequest)
-        audioFocusRequest = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val focusRequest = audioFocusRequest ?: return
+            manager.abandonAudioFocusRequest(focusRequest)
+            audioFocusRequest = null
+        } else {
+            val listener = audioFocusChangeListener ?: return
+            manager.abandonAudioFocus(listener)
+        }
+        audioFocusChangeListener = null
     }
 
     private fun handleAudioFocusChanged(focusChange: Int) {
@@ -491,13 +590,14 @@ class RecordingForegroundService: Service() {
     }
 
     private fun buildNotification(status: String, showResumeAction: Boolean = false): Notification {
+        val isActivelyRecording = status.startsWith("Recording")
+
+        // PendingIntents
         val resumeIntent = Intent(this, RecordingForegroundService::class.java).apply {
             action = ACTION_RESUME
         }
         val resumePendingIntent = PendingIntent.getService(
-            this,
-            1,
-            resumeIntent,
+            this, 1, resumeIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -505,53 +605,52 @@ class RecordingForegroundService: Service() {
             action = ACTION_STOP
         }
         val stopPendingIntent = PendingIntent.getService(
-            this,
-            0,
-            stopIntent,
+            this, 0, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Tap action: open the app
-        val openAppIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        // Tap action: open the app at the recording screen
+        val openAppIntent = Intent(this, com.example.audioscribe.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_NAVIGATE_TO_RECORDING, true)
         }
         val openAppPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            openAppIntent,
+            this, 0, openAppIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        val displayStatus = if (!isActivelyRecording && !status.startsWith("Stopped") && elapsedAtPauseMs > 0) {
+            val totalSec = elapsedAtPauseMs / 1000
+            "$status \u2022 %02d:%02d".format(totalSec / 60, totalSec % 60)
+        } else status
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("AudioScribe - Recording")
-            .setContentText(status)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setContentTitle("AudioScribe")
+            .setContentText(displayStatus)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(openAppPendingIntent)
             .setAutoCancel(false)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
-        if (showResumeAction) {
-            builder.addAction(
-                android.R.drawable.ic_media_play,
-                "Resume",
-                resumePendingIntent
-            )
+        if (isActivelyRecording) {
+            val totalElapsedMs = elapsedAtPauseMs + (System.currentTimeMillis() - segmentStartTimeMs)
+            builder.setUsesChronometer(true)
+            builder.setWhen(System.currentTimeMillis() - totalElapsedMs)
         }
 
-        builder.addAction(
-            android.R.drawable.ic_media_pause,
-            "Stop",
-            stopPendingIntent
-        )
+        if (showResumeAction) {
+            builder.addAction(android.R.drawable.ic_media_play, "Resume", resumePendingIntent)
+        }
+
+        builder.addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent)
 
         return builder.build()
     }
 
     private fun createNotificationChannel() {
-        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Recording",
@@ -613,8 +712,7 @@ class RecordingForegroundService: Service() {
             try {
                 unregisterReceiver(it)
             } catch (_: IllegalArgumentException) {
-                // Receiver not registered
-                Log.d("RecordingForegroundService", "Receiver not registered")
+                Log.d("RecordingForegroundService", "Receiver already unregistered")
             }
         }
         headsetReceiver = null
@@ -654,7 +752,6 @@ class RecordingForegroundService: Service() {
     private fun checkSilence(amplitude: Int) {
         val now = System.currentTimeMillis()
         if (amplitude > SILENCE_THRESHOLD) {
-            Log.d("RecordingForegroundService", "Silence not detected")
             silenceStartMs = now
             if (isSilenceWarningActive) {
                 isSilenceWarningActive = false
@@ -677,6 +774,7 @@ class RecordingForegroundService: Service() {
         const val ACTION_PAUSE = "ACTION_PAUSE_RECORDING"
         const val ACTION_RESUME = "ACTION_RESUME_RECORDING"
         const val EXTRA_SESSION_ID = "EXTRA_SESSION_ID"
+        const val EXTRA_NAVIGATE_TO_RECORDING = "EXTRA_NAVIGATE_TO_RECORDING"
         const val STATUS_PAUSED_PHONE_CALL = "PAUSED_PHONE_CALL"
         const val STATUS_PAUSED_AUDIO_FOCUS = "PAUSED_AUDIO_FOCUS"
         const val STATUS_STOPPED_LOW_STORAGE = "STOPPED_LOW_STORAGE"
@@ -685,5 +783,24 @@ class RecordingForegroundService: Service() {
         private const val STORAGE_CHECK_INTERVAL_MS = 10_000L  // check every 10 seconds
         private const val SILENCE_THRESHOLD = 800  // amplitude below this is considered silent
         private const val SILENCE_DURATION_MS = 10_000L  // 10 seconds of silence triggers warning
+
+        /** True while the service is actively managing a recording session. */
+        @Volatile
+        var isRunning = false
+            private set
+
+        // --- Shared elapsed time state (single source of truth for UI + notification) ---
+        @Volatile private var sElapsedAtPauseMs: Long = 0
+        @Volatile private var sSegmentStartTimeMs: Long = 0
+        @Volatile private var sIsActivelyRecording: Boolean = false
+
+        /** Returns total elapsed recording time in milliseconds. Safe to call from any thread. */
+        fun getElapsedMs(): Long {
+            return if (sIsActivelyRecording) {
+                sElapsedAtPauseMs + (System.currentTimeMillis() - sSegmentStartTimeMs)
+            } else {
+                sElapsedAtPauseMs
+            }
+        }
     }
 }

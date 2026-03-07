@@ -23,21 +23,3 @@ data class InlineData(
     val mimeType: String,
     val data: String   // base64-encoded
 )
-
-// ── Response ─────────────────────────────────────────────────────────────
-
-data class GeminiResponse(
-    val candidates: List<GeminiCandidate>?
-)
-
-data class GeminiCandidate(
-    val content: GeminiResponseContent?
-)
-
-data class GeminiResponseContent(
-    val parts: List<GeminiResponsePart>?
-)
-
-data class GeminiResponsePart(
-    val text: String?
-)

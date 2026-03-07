@@ -30,7 +30,7 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "audioScribe.db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides

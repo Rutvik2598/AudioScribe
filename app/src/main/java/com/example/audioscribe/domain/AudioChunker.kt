@@ -43,7 +43,7 @@ class AudioChunker(
                 val avgAmp = if(amplitudeCount > 0) amplitudeSum / amplitudeCount else 0
 
                 val endTime = System.currentTimeMillis()
-                val startTime = System.currentTimeMillis() - (chunkDurationSec * 1000L)
+                val startTime = endTime - (chunkDurationSec * 1000L)
 
                 val chunk = AudioChunk(
                     bytes = chunkBytes,
@@ -56,12 +56,10 @@ class AudioChunker(
                 val overlapStart = chunkSizeBytes - overlapSizeBytes
                 val overlapBytes = buffer.copyOfRange(overlapStart, chunkSizeBytes)
 
-                // Reset buffer
                 buffer = ByteArray(chunkSizeBytes)
                 System.arraycopy(overlapBytes, 0, buffer, 0, overlapBytes.size)
                 bufferWritePos = overlapBytes.size
 
-                // Reset amplitude stats
                 amplitudeSum = 0
                 amplitudeCount = 0
 
@@ -88,7 +86,6 @@ class AudioChunker(
             endTimeMs = endTime,
             avgAmplitude = avgAmp
         )
-        // Reset buffer and amplitude stats
         buffer = ByteArray(chunkSizeBytes)
         bufferWritePos = 0
         amplitudeSum = 0

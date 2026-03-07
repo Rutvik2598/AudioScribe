@@ -1,3 +1,47 @@
 <resources>
     <string name="app_name">AudioScribe</string>
+
+    <!-- Common -->
+    <string name="cd_back">Back</string>
+    <string name="cd_menu">Menu</string>
+
+    <!-- HomeScreen -->
+    <string name="home_tagline">Capture memories using AudioScribe on your Desktop </string>
+    <string name="home_capture_notes">Capture Notes</string>
+    <string name="cd_hero_image">Scenic landscape</string>
+    <string name="home_notes_chats">Notes &amp; Chats</string>
+    <string name="home_view_memories">View Memories</string>
+    <string name="home_coming_up">Coming Up</string>
+    <string name="home_no_upcoming_meetings">No upcoming meetings</string>
+
+    <!-- RecordingScreen -->
+    <string name="recording_listening">I\'m listening and taking notes…</string>
+    <string name="recording_start_prompt">Start capturing by pressing play button</string>
+    <string name="recording_stop">\u25A0  Stop</string>
+    <string name="recording_start">Start Recording</string>
+    <string name="recording_silence_warning">No audio detected – Check microphone</string>
+    <string name="tab_transcript">Transcript</string>
+    <string name="tab_summary">Summary</string>
+    <string name="recording_transcript_placeholder">The transcript will update every 60s, it will appear here automatically as you speak</string>
+    <string name="recording_summary_placeholder">Summary will appear here once transcription is available.</string>
+
+    <!-- RecordingViewModel (user-facing error messages) -->
+    <string name="error_recording_stopped_low_storage">Recording stopped – Low storage</string>
+    <string name="error_cannot_start_low_storage">Cannot start recording – Low storage</string>
+    <string name="error_transcription_failed">Transcription failed after retries. Check your network and API key.</string>
+    <string name="error_summary_failed">Failed to generate summary.</string>
+
+    <!-- MemoriesScreen -->
+    <string name="memories_title">Memories</string>
+    <string name="memories_filter_notes">Notes</string>
+    <string name="memories_no_recordings">No recordings yet.</string>
+    <string name="memories_untitled">Untitled Meeting</string>
+    <string name="memories_today">Today</string>
+    <string name="memories_duration_format">%1$s \u00B7 %2$dm</string>
+
+    <!-- RecordingDetailScreen -->
+    <string name="detail_title">Recording Details</string>
+    <string name="detail_transcription">Transcription</string>
+    <string name="detail_summary">Summary</string>
+    <string name="detail_not_available">Not available yet.</string>
 </resources>

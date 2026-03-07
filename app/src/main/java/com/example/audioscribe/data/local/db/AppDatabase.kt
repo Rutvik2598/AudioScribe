@@ -8,7 +8,7 @@ import com.example.audioscribe.data.local.entity.RecordingSessionEntity
 
 @Database(
     entities = [RecordingSessionEntity::class, AudioChunkEntity::class],
-    version = 1
+    version = 3
 )
 abstract class AppDatabase: RoomDatabase() {
     abstract fun recordingDao(): RecordingDao
